@@ -1,0 +1,153 @@
+function doPost(e) {
+  const data = JSON.parse(e.postData.contents);
+
+  if (data.action === 'checkTournamentTitle') {
+    return checkTournamentTitle(data);
+  } else if (data.action === 'saveRoomDetails') {
+    return saveRoomDetails(data);
+  }
+}
+
+function checkTournamentTitle(data) {
+  const tournamentTitle = data.tournamentTitle;
+  const upcomingSheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Upcoming');
+  const upcomingData = upcomingSheet.getRange('A2:F' + upcomingSheet.getLastRow()).getValues();
+  const matchingRows = upcomingData.filter(row => row[0] === tournamentTitle);
+
+  return ContentService.createTextOutput(JSON.stringify({
+    success: matchingRows.length > 0,
+    message: matchingRows.length > 0 ? 'Tournament found' : 'No matching tournaments found',
+    count: matchingRows.length
+  })).setMimeType(ContentService.MimeType.JSON);
+}
+
+function saveRoomDetails(data) {
+  const tournamentTitle = data.tournamentTitle;
+  const roomId = data.roomId;
+  const roomPassword = data.roomPassword;
+  const upcomingSheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Upcoming');
+  const usersSheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Users');
+  const upcomingData = upcomingSheet.getRange('A2:I' + upcomingSheet.getLastRow()).getValues();
+  const usersData = usersSheet.getRange('C2:G' + usersSheet.getLastRow()).getValues();
+
+  const matchingRowIndices = upcomingData.reduce((indices, row, index) => {
+    if (row[0] === tournamentTitle) {
+      indices.push({
+        rowIndex: index + 2,
+        username: row[5]
+      });
+    }
+    return indices;
+  }, []);
+
+  if (matchingRowIndices.length === 0) {
+    return ContentService.createTextOutput(JSON.stringify({
+      success: false,
+      message: 'No matching tournaments found'
+    })).setMimeType(ContentService.MimeType.JSON);
+  }
+
+  matchingRowIndices.forEach(match => {
+    const rowIndex = match.rowIndex;
+    const username = match.username;
+    upcomingSheet.getRange(`H${rowIndex}`).setValue(roomId);
+    upcomingSheet.getRange(`I${rowIndex}`).setValue(roomPassword);
+
+    const userEmailRow = usersData.findIndex(row => row[0] === username);
+    const userEmail = userEmailRow !== -1 ? usersData[userEmailRow][4] : null;
+
+    if (userEmail) {
+      sendRoomDetailsEmail(userEmail, tournamentTitle, roomId, roomPassword);
+    }
+  });
+
+  return ContentService.createTextOutput(JSON.stringify({
+    success: true,
+    message: `Room details saved for ${matchingRowIndices.length} tournament(s)`,
+    count: matchingRowIndices.length
+  })).setMimeType(ContentService.MimeType.JSON);
+}
+
+function sendRoomDetailsEmail(email, tournamentTitle, roomId, roomPassword) {
+  const emailBody = `
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+      <meta charset="UTF-8">
+      <style>
+        body {
+          font-family: Arial, sans-serif;
+          line-height: 1.6;
+          color: #333;
+          max-width: 600px;
+          margin: 0 auto;
+          padding: 20px;
+          background-color: #f4f4f4;
+        }
+        .container {
+          background-color: white;
+          border-radius: 8px;
+          padding: 30px;
+          box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        }
+        .header {
+          background-color: #4A90E2;
+          color: white;
+          text-align: center;
+          padding: 15px;
+          border-radius: 8px 8px 0 0;
+        }
+        .content {
+          margin-top: 20px;
+        }
+        .details {
+          background-color: #f9f9f9;
+          border: 1px solid #e0e0e0;
+          border-radius: 5px;
+          padding: 15px;
+          margin: 20px 0;
+        }
+        .footer {
+          text-align: center;
+          color: #777;
+          margin-top: 20px;
+          font-size: 0.9em;
+        }
+        .credentials {
+          font-weight: bold;
+          color: #2c3e50;
+        }
+      </style>
+    </head>
+    <body>
+      <div class="container">
+        <div class="header">
+          <h1>Tournament Room Details</h1>
+        </div>
+        <div class="content">
+          <p>Dear Tournament Participant,</p>
+          <p>Your room details for the tournament <strong>"${tournamentTitle}"</strong> have been updated:</p>
+          
+          <div class="details">
+            <p>Room ID: <span class="credentials">${roomId}</span></p>
+            <p>Room Password: <span class="credentials">${roomPassword}</span></p>
+          </div>
+          
+          <p>Please use these credentials to join the tournament. If you have any questions, contact our support team.</p>
+          
+          <p>Best regards,<br>Krish Gaming</p>
+        </div>
+        <div class="footer">
+          <p>© 2025 Krish Gaming. All rights reserved.</p>
+        </div>
+      </div>
+    </body>
+    </html>
+  `;
+
+  MailApp.sendEmail({
+    to: email,
+    subject: `Tournament Room Details: ${tournamentTitle}`,
+    htmlBody: emailBody
+  });
+}
